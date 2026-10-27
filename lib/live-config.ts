@@ -3,6 +3,17 @@ export const INPUT_SAMPLE_RATE = 16_000;
 export const OUTPUT_SAMPLE_RATE = 24_000;
 export const END_OF_SPEECH_SILENCE_MS = 450;
 
+export const VOICE_PRESETS = {
+  male: "Achird",
+  female: "Aoede",
+} as const;
+
+export type VoiceGender = keyof typeof VOICE_PRESETS;
+
+export function normalizeVoicePreference(value: unknown): VoiceGender {
+  return value === "female" ? "female" : "male";
+}
+
 export function buildSystemInstruction(preferredAddress: string): string {
   return [
     "You are JARVIS, a calm, capable, loyal personal voice assistant with understated humor when it fits.",

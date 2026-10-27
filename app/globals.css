@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Sinhala:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap");
 
 :root {
   color-scheme: dark;
@@ -24,7 +24,7 @@ body {
     radial-gradient(ellipse at 75% 43%, rgba(13, 95, 130, .2), transparent 38rem),
     radial-gradient(ellipse at 12% 4%, rgba(21, 65, 104, .2), transparent 32rem),
     linear-gradient(145deg, #07111c 0%, #03070d 54%, #050b12 100%);
-  font-family: "Noto Sans Sinhala", "Manrope", system-ui, sans-serif;
+  font-family: "Manrope", system-ui, sans-serif;
   letter-spacing: -.015em;
 }
 button, input { font: inherit; }
@@ -46,10 +46,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outl
 .brand-mark b { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: white; box-shadow: 0 0 8px white; }
 .brand-name { display: block; font: 500 14px/1 "DM Mono", monospace; letter-spacing: .28em; }
 .brand-sub { display: block; margin-top: 7px; color: #7694a4; font-size: 10px; letter-spacing: .045em; }
-.phase-tag, .connection-badge { min-height: 36px; display: inline-flex; align-items: center; gap: 10px; padding: 0 13px; border: 1px solid var(--line); background: rgba(6, 15, 24, .72); color: #9bb1bf; font: 400 10px/1.4 "DM Mono", "Noto Sans Sinhala", monospace; letter-spacing: .08em; }
+.phase-tag, .connection-badge { min-height: 36px; display: inline-flex; align-items: center; gap: 10px; padding: 0 13px; border: 1px solid var(--line); background: rgba(6, 15, 24, .72); color: #9bb1bf; font: 400 10px/1.4 "DM Mono", monospace; letter-spacing: .08em; }
 .phase-tag { clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); }
 .phase-tag b { color: var(--cyan); font-size: 12px; }
-.connection-badge { border-radius: 999px; font-family: "Noto Sans Sinhala", "Manrope", sans-serif; font-size: 11px; letter-spacing: 0; white-space: nowrap; }
+.connection-badge { border-radius: 999px; font-family: "Manrope", sans-serif; font-size: 11px; letter-spacing: 0; white-space: nowrap; }
 .status-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #8395a2; box-shadow: 0 0 0 4px rgba(131, 149, 162, .11); }
 .connection-badge.online .status-dot { background: #66ffcc; box-shadow: 0 0 11px #66ffcc; }
 .connection-badge.busy .status-dot { background: var(--amber); box-shadow: 0 0 12px var(--amber); animation: blink .8s ease-in-out infinite; }
@@ -58,7 +58,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outl
 
 .content { max-width: 1440px; min-height: calc(100svh - 126px); margin: 0 auto; display: grid; grid-template-columns: minmax(310px, .83fr) minmax(440px, 1.17fr); align-items: center; gap: clamp(30px, 6vw, 94px); position: relative; z-index: 1; padding: 30px 0 28px; }
 .intro { max-width: 560px; padding: 10px 0 16px; }
-.kicker { display: flex; align-items: center; gap: 10px; color: #76b8cd; font: 500 10px/1.5 "DM Mono", "Noto Sans Sinhala", monospace; letter-spacing: .1em; }
+.kicker { display: flex; align-items: center; gap: 10px; color: #76b8cd; font: 500 10px/1.5 "DM Mono", monospace; letter-spacing: .1em; }
 .kicker-line { width: 24px; height: 1px; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
 .intro h1 { margin: 22px 0 14px; font-size: clamp(34px, 4.7vw, 64px); line-height: 1.36; letter-spacing: -.055em; font-weight: 500; }
 .intro h1 span { color: var(--cyan-bright); text-shadow: 0 0 34px rgba(109, 233, 255, .23); }
@@ -76,6 +76,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outl
 .address-input { width: 100%; min-width: 0; min-height: 43px; border: 1px solid rgba(155, 194, 211, .24); border-radius: 7px; padding: 10px 12px; color: var(--text); background: rgba(2, 7, 12, .7); font-size: 13px; transition: border-color .2s ease, box-shadow .2s ease; }
 .address-input:focus { border-color: rgba(109, 233, 255, .68); box-shadow: 0 0 18px rgba(54, 175, 228, .1); }
 .address-input::placeholder { color: #627684; }
+.address-input option { color: var(--text); background: #07111c; }
+.voice-choice { margin-top: 14px; }
+.voice-select { cursor: pointer; }
 .field-hint { margin: 8px 0 0; color: #6f8593; font-size: 10px; line-height: 1.7; }
 .action-row { display: flex; gap: 12px; align-items: center; margin-top: 17px; flex-wrap: wrap; }
 .primary-button, .quiet-button { min-height: 47px; border-radius: 7px; padding: 0 17px; border: 1px solid transparent; cursor: pointer; transition: transform .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease; }
@@ -90,7 +93,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outl
 .privacy-note { margin: 14px 2px 0; max-width: 460px; color: #728592; font-size: 10px; line-height: 1.9; }
 
 .reactor-column { width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 625px; position: relative; }
-.reactor-topline { width: min(100%, 520px); display: flex; align-items: center; gap: 9px; color: #7697a8; font: 400 9px/1.5 "DM Mono", "Noto Sans Sinhala", monospace; letter-spacing: .08em; }
+.reactor-topline { width: min(100%, 520px); display: flex; align-items: center; gap: 9px; color: #7697a8; font: 400 9px/1.5 "DM Mono", monospace; letter-spacing: .08em; }
 .reactor-topline i { height: 1px; flex: 1; background: linear-gradient(90deg, rgba(109, 233, 255, .32), transparent); }
 .reactor-topline span:last-child { color: #9ad9e2; }
 .reactor-shell { width: min(73vw, 510px); aspect-ratio: 1; display: grid; place-items: center; position: relative; isolation: isolate; margin-top: 1px; --audio-level: .035; }
@@ -118,7 +121,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outl
 .reactor-shell.error .reactor-core { box-shadow: 0 0 42px rgba(255, 119, 119, .32), inset 0 0 30px rgba(255, 119, 119, .24); }
 .orbit-label { position: absolute; z-index: 2; color: #7fbbcc; font: 400 9px/1 "DM Mono", monospace; letter-spacing: .27em; text-shadow: 0 0 12px rgba(90, 218, 255, .44); }
 .orbit-label.top { top: 5.5%; }
-.orbit-label.bottom { bottom: 5.5%; letter-spacing: .13em; font-family: "Noto Sans Sinhala", sans-serif; }
+.orbit-label.bottom { bottom: 5.5%; letter-spacing: .13em; }
 .reactor-caption { width: min(100%, 520px); display: flex; align-items: center; gap: 10px; min-height: 29px; margin-top: -6px; color: #8299a8; font-size: 11px; }
 .reactor-caption strong { color: var(--cyan-bright); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .reactor-caption span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -141,19 +144,19 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outl
 .transcript-live { display: inline-flex; align-items: center; gap: 7px; color: #8198a6; font-size: 9px; }
 .transcript-live i { width: 5px; height: 5px; }
 .transcript-row { min-height: 75px; padding: 13px 0 11px; }
-.transcript-role { display: block; margin-bottom: 7px; color: #6faabe; font: 400 9px/1.4 "DM Mono", "Noto Sans Sinhala", monospace; letter-spacing: .06em; }
+.transcript-role { display: block; margin-bottom: 7px; color: #6faabe; font: 400 9px/1.4 "DM Mono", monospace; letter-spacing: .06em; }
 .assistant-row .transcript-role { color: #72d8e9; }
 .transcript-row p { min-height: 25px; max-height: 82px; overflow: auto; margin: 0; color: #c4d6df; font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
 .transcript-row p:empty { color: #657e8c; }
 .transcript-divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(125, 192, 212, .16), transparent); }
 .side-rail { width: min(100%, 520px); border: 1px solid rgba(115, 183, 208, .13); border-radius: 9px; background: rgba(4, 11, 18, .55); padding: 13px 17px 11px; margin-top: 12px; }
-.rail-head { display: flex; justify-content: space-between; align-items: center; color: #7995a4; font: 400 9px/1.5 "DM Mono", "Noto Sans Sinhala", monospace; letter-spacing: .06em; }
+.rail-head { display: flex; justify-content: space-between; align-items: center; color: #7995a4; font: 400 9px/1.5 "DM Mono", monospace; letter-spacing: .06em; }
 .rail-head span:last-child { color: #587686; }
 .rail-rule { height: 1px; background: rgba(125, 192, 212, .12); margin: 9px 0 5px; }
 .rail-row { display: flex; justify-content: space-between; gap: 14px; padding: 5px 0; color: #8499a6; font-size: 10px; }
-.rail-row b { color: #bed1da; font: 400 10px/1.6 "DM Mono", "Noto Sans Sinhala", monospace; text-align: right; }
+.rail-row b { color: #bed1da; font: 400 10px/1.6 "DM Mono", monospace; text-align: right; }
 .rail-row .live-value { color: #78e9c3; }
-.footer { max-width: 1440px; margin: 0 auto; padding-top: 12px; border-top: 1px solid rgba(137, 177, 199, .1); display: flex; justify-content: space-between; gap: 12px; position: relative; z-index: 1; color: #5f7683; font: 400 9px/1.6 "DM Mono", "Noto Sans Sinhala", monospace; letter-spacing: .035em; }
+.footer { max-width: 1440px; margin: 0 auto; padding-top: 12px; border-top: 1px solid rgba(137, 177, 199, .1); display: flex; justify-content: space-between; gap: 12px; position: relative; z-index: 1; color: #5f7683; font: 400 9px/1.6 "DM Mono", monospace; letter-spacing: .035em; }
 .footer a { color: #89c7d5; text-decoration: none; }
 .footer a:hover { color: var(--cyan-bright); }
 

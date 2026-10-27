@@ -36,3 +36,8 @@ JARVIS පරිශීලකයා කතා කරන භාෂාවෙන්�
 - [කෙටි කාලීන token](https://ai.google.dev/gemini-api/docs/ephemeral-tokens)
 - [හඬ හඳුනාගැනීම, VAD සහ භාෂා](https://ai.google.dev/gemini-api/docs/live-guide)
 - [සැසි කළමනාකරණය](https://ai.google.dev/gemini-api/docs/live-session)
+
+
+## Voice selection
+
+The interface is entirely in English. Choose **Male — Achird** or **Female — Aoede** from the assistant voice selector. The selection is saved in this browser and applied to both the server-issued session token constraints and the live Gemini session. The assistant can still converse in Sinhala or English, and transcripts follow the spoken language.

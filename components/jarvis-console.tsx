@@ -7,6 +7,9 @@ import {
   INPUT_SAMPLE_RATE,
   LIVE_MODEL,
   OUTPUT_SAMPLE_RATE,
+  normalizeVoicePreference,
+  VOICE_PRESETS,
+  type VoiceGender,
 } from "@/lib/live-config";
 
 type ConsoleState = "ready" | "connecting" | "listening" | "thinking" | "speaking" | "error";
@@ -31,27 +34,32 @@ type IncomingMessage = {
 type TokenResponse = {
   token?: string;
   model?: string;
+  assistantVoice?: VoiceGender;
   systemInstruction?: string;
   error?: string;
 };
 
 const stateLabels: Record<ConsoleState, string> = {
-  ready: "සූදානම්",
-  connecting: "සම්බන්ධ වෙමින්",
-  listening: "ඔබට සවන් දෙමින්",
-  thinking: "පිළිතුර සකස් කරමින්",
-  speaking: "කතා කරමින්",
-  error: "සම්බන්ධතාවේ ගැටලුවක්",
+  ready: "Ready",
+  connecting: "Connecting",
+  listening: "Listening",
+  thinking: "Thinking",
+  speaking: "Speaking",
+  error: "Connection issue",
 };
 
 const stateDescriptions: Record<ConsoleState, string> = {
-  ready: "හඬ සංවාදය ආරම්භ කිරීමට සූදානම්",
-  connecting: "මයික්‍රෆෝනය සහ සජීවී හඬ සම්බන්ධතාව සකසමින්",
-  listening: "ඔබේ හඬට සවන් දෙමින් සිටී",
-  thinking: "ඔබට පිළිතුර සකස් කරමින් සිටී",
-  speaking: "JARVIS දැන් කතා කරමින් සිටී",
-  error: "සම්බන්ධතාව පරීක්ෂා කර නැවත උත්සාහ කරන්න",
+  ready: "Ready to start a voice session",
+  connecting: "Setting up your microphone and live connection",
+  listening: "Listening to your voice",
+  thinking: "Preparing a response",
+  speaking: "JARVIS is speaking",
+  error: "Check your connection and try again",
 };
+
+function cleanPreferredAddress(value: string): string {
+  return value.replace(/[^A-Za-z0-9 .'’_-]/g, "").slice(0, 32);
+}
 
 function appendTranscriptChunk(current: string, incoming: string): string {
   const chunk = incoming.trim();
@@ -103,7 +111,8 @@ function decodeBase64(value: string): Uint8Array {
 
 export default function JarvisConsole() {
   const [status, setStatus] = useState<ConsoleState>("ready");
-  const [preferredAddress, setPreferredAddress] = useState("සර්");
+  const [preferredAddress, setPreferredAddress] = useState("Sir");
+  const [assistantVoice, setAssistantVoice] = useState<VoiceGender>("male");
   const [errorMessage, setErrorMessage] = useState("");
   const [heardText, setHeardText] = useState("");
   const [spokenText, setSpokenText] = useState("");
@@ -142,7 +151,7 @@ export default function JarvisConsole() {
   const clearPlayback = useCallback(() => {
     for (const source of activeSourcesRef.current) {
       source.onended = null;
-      try { source.stop(); } catch { /* ශබ්ද මූලාශ්‍රය දැනටමත් අවසන් වී තිබිය හැක. */ }
+      try { source.stop(); } catch { /* The audio source may already have ended. */ }
       source.disconnect();
     }
     activeSourcesRef.current = [];
@@ -206,8 +215,8 @@ export default function JarvisConsole() {
   const releaseSession = useCallback(() => {
     const session = sessionRef.current;
     sessionRef.current = null;
-    try { session?.sendRealtimeInput({ audioStreamEnd: true }); } catch { /* සම්බන්ධතාව අවසන් වී තිබිය හැක. */ }
-    try { session?.close(); } catch { /* සම්බන්ධතාව දැනටමත් වසා තිබිය හැක. */ }
+    try { session?.sendRealtimeInput({ audioStreamEnd: true }); } catch { /* The connection may already be closed. */ }
+    try { session?.close(); } catch { /* The session may already be closed. */ }
     clearPlayback();
     releaseAudio();
     resetTranscripts();
@@ -248,7 +257,7 @@ export default function JarvisConsole() {
       };
 
       if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("මෙම බ්‍රවුසරයෙන් මයික්‍රෆෝනය භාවිත කළ නොහැක.");
+        throw new Error("This browser cannot access a microphone.");
       }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -259,19 +268,25 @@ export default function JarvisConsole() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ preferredAddress: preferredAddress.trim() || "සර්" }),
+        body: JSON.stringify({ preferredAddress: preferredAddress.trim() || "Sir", assistantVoice }),
       });
       const tokenData = (await tokenResponse.json()) as TokenResponse;
       if (!tokenResponse.ok || !tokenData.token || !tokenData.systemInstruction) {
-        throw new Error(tokenData.error || "සජීවී හඬ සංවාදය ආරම්භ කළ නොහැකි විය.");
+        throw new Error(tokenData.error || "Could not start the live voice session.");
       }
 
       const ai = new GoogleGenAI({ apiKey: tokenData.token });
+      const activeVoice = normalizeVoicePreference(tokenData.assistantVoice ?? assistantVoice);
       const session = await ai.live.connect({
         model: tokenData.model || LIVE_MODEL,
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: { parts: [{ text: tokenData.systemInstruction }] },
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: VOICE_PRESETS[activeVoice] },
+            },
+          },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           realtimeInputConfig: {
@@ -322,7 +337,7 @@ export default function JarvisConsole() {
             }
           },
           onerror: () => {
-            setErrorMessage("සජීවී හඬ සම්බන්ධතාවයේ ගැටලුවක් ඇති විය. නැවත සම්බන්ධ කරන්න.");
+            setErrorMessage("A live voice connection problem occurred. Please reconnect.");
             releaseSession();
             updateStatus("error");
           },
@@ -383,7 +398,7 @@ export default function JarvisConsole() {
               audio: { data: pcmToBase64(samples, micContext.sampleRate), mimeType: `audio/pcm;rate=${INPUT_SAMPLE_RATE}` },
             });
           } catch {
-            setErrorMessage("මයික්‍රෆෝනයේ හඬ සජීවී සේවාව වෙත යැවිය නොහැකි විය.");
+            setErrorMessage("Could not send microphone audio to the live service.");
             releaseSession();
             updateStatus("error");
           }
@@ -393,9 +408,9 @@ export default function JarvisConsole() {
       source.connect(worklet);
       await micContext.resume();
       updateStatus("listening");
-      window.localStorage.setItem("jarvis-preferred-address", preferredAddress.trim() || "සර්");
+      window.localStorage.setItem("jarvis-preferred-address", preferredAddress.trim() || "Sir");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "සම්බන්ධතාව ආරම්භ කළ නොහැකි විය.";
+      const message = error instanceof Error ? error.message : "Could not start the connection.";
       setErrorMessage(message);
       releaseSession();
       updateStatus("error");
@@ -404,7 +419,9 @@ export default function JarvisConsole() {
 
   useEffect(() => {
     const savedAddress = window.localStorage.getItem("jarvis-preferred-address");
-    if (savedAddress) setPreferredAddress(savedAddress);
+    if (savedAddress) setPreferredAddress(cleanPreferredAddress(savedAddress) || "Sir");
+    const savedVoice = window.localStorage.getItem("jarvis-assistant-voice");
+    if (savedVoice) setAssistantVoice(normalizeVoicePreference(savedVoice));
   }, []);
 
   useEffect(() => {
@@ -413,7 +430,7 @@ export default function JarvisConsole() {
       for (const context of [micContextRef.current, outputContextRef.current]) {
         if (context?.state === "suspended") {
           void context.resume().catch(() => {
-            setErrorMessage("බ්‍රවුසරයේ ශබ්දය නවතා ඇත. නැවත සම්බන්ධ කර බලන්න.");
+            setErrorMessage("Browser audio was suspended. Reconnect and try again.");
             releaseSession();
             updateStatus("error");
           });
@@ -460,10 +477,10 @@ export default function JarvisConsole() {
           <span className="brand-mark" aria-hidden="true"><i /><b /></span>
           <div>
             <span className="brand-name">JARVIS</span>
-            <span className="brand-sub">සජීවී හඬ සහායක</span>
+            <span className="brand-sub">LIVE VOICE ASSISTANT</span>
           </div>
         </div>
-        <div className="phase-tag"><b>01</b><span>පළමු අදියර · සජීවී හඬ</span></div>
+        <div className="phase-tag"><b>01</b><span>PHASE ONE · LIVE VOICE</span></div>
         <div className={`connection-badge ${connected ? "online" : busy ? "busy" : status === "error" ? "fault" : ""}`} aria-live="polite">
           <span className="status-dot" aria-hidden="true" />
           {stateLabels[status]}
@@ -472,52 +489,69 @@ export default function JarvisConsole() {
 
       <section className="content">
         <div className="intro">
-          <div className="kicker"><span className="kicker-line" /> පුද්ගලික හඬ පාලකය</div>
-          <h1>ඔබ කතා කරන්න.<br /><span>JARVIS සවන් දෙයි.</span></h1>
+          <div className="kicker"><span className="kicker-line" /> PERSONAL VOICE CONSOLE</div>
+          <h1>Speak naturally.<br /><span>JARVIS is listening.</span></h1>
           <p className="intro-copy">
-            සිංහලෙන් හෝ ඉංග්‍රීසියෙන් කතා කරන්න. ඔබ කතා කරන අතරතුර අසාගත් දේත්, JARVIS පිළිතුරු දෙන විට එහි වචනත් මෙහි පෙන්වයි.
+            Speak in English or Sinhala. See what you say and follow JARVIS’s spoken reply as it happens.
           </p>
 
           <div className="voice-card">
             <div className="voice-card-head">
-              <span className="card-index">01 / හඬ සැකසුම</span>
-              <span className="secure-tag"><i /> පුද්ගලික සැකසුම</span>
+              <span className="card-index">01 / VOICE SETTINGS</span>
+              <span className="secure-tag"><i /> STORED ON THIS DEVICE</span>
             </div>
-            <label className="field-label" htmlFor="preferred-address">ඔබට අමතන්න කැමති නම</label>
+            <label className="field-label" htmlFor="preferred-address">Preferred name</label>
             <div className="address-row">
               <input
                 id="preferred-address"
                 className="address-input"
                 value={preferredAddress}
-                onChange={(event) => setPreferredAddress(event.target.value.slice(0, 32))}
+                onChange={(event) => setPreferredAddress(cleanPreferredAddress(event.target.value))}
                 maxLength={32}
-                placeholder="උදාහරණය: සර්, නම"
+                placeholder="For example: Sir, Alex"
                 autoComplete="off"
                 disabled={connected || busy}
               />
             </div>
-            <p className="field-hint">මෙම නම මෙම බ්‍රවුසරයේ පමණක් සුරැකේ.</p>
+            <p className="field-hint">This name is saved only in this browser.</p>
+            <div className="voice-choice">
+              <label className="field-label" htmlFor="assistant-voice">Assistant voice</label>
+              <select
+                id="assistant-voice"
+                className="address-input voice-select"
+                value={assistantVoice}
+                onChange={(event) => {
+                  const voice = normalizeVoicePreference(event.target.value);
+                  setAssistantVoice(voice);
+                  window.localStorage.setItem("jarvis-assistant-voice", voice);
+                }}
+                disabled={connected || busy}
+              >
+                <option value="male">Male — Achird · Warm</option>
+                <option value="female">Female — Aoede · Breezy</option>
+              </select>
+            </div>
             <div className="action-row">
               {!connected ? (
                 <button className="primary-button" onClick={startSession} disabled={busy}>
                   <span className="button-icon" aria-hidden="true">{busy ? "···" : "◉"}</span>
-                  {busy ? "සම්බන්ධ වෙමින්…" : status === "error" ? "නැවත සම්බන්ධ කරන්න" : "හඬ සංවාදය අරඹන්න"}
+                  {busy ? "Connecting…" : status === "error" ? "Reconnect" : "Start voice session"}
                 </button>
               ) : (
-                <button className="quiet-button" onClick={releaseSession}>සංවාදය අවසන් කරන්න</button>
+                <button className="quiet-button" onClick={releaseSession}>End session</button>
               )}
-              <span className="permission-hint">ආරම්භයේදී microphone අවසරය දෙන්න</span>
+              <span className="permission-hint">Allow microphone access when prompted.</span>
             </div>
             {errorMessage && <p className="error-note" role="alert">{errorMessage}</p>}
           </div>
 
           <div className="privacy-note">
-            ඔබේ හඬ සජීවීව Google Gemini Live API වෙත යවයි. මෙම යෙදුම හඬ හෝ සංවාද පිටපත් ගබඩා නොකරයි. පිටපත් දිස්වන්නේ මෙම සජීවී සැසියේදී පමණි.
+            Your voice is streamed to Google Gemini Live. This app does not store audio or transcripts; transcripts appear only during this live session.
           </div>
         </div>
 
         <div className="reactor-column">
-          <div className="reactor-topline"><span>ශබ්ද සබැඳිය</span><i /><span>{connected ? "සක්‍රීයයි" : "සූදානම්"}</span></div>
+          <div className="reactor-topline"><span>AUDIO LINK</span><i /><span>{connected ? "ACTIVE" : "STANDBY"}</span></div>
           <div ref={reactorRef} className={`reactor-shell ${visualState}`} aria-hidden="true">
             <div className="reactor-halo" />
             <div className="reactor-ring outer" />
@@ -529,7 +563,7 @@ export default function JarvisConsole() {
             <div className="reactor-cross reactor-cross-y" />
             <span className="orbit-label top">J · A · R · V · I · S</span>
             <div className="reactor-core"><span>J</span></div>
-            <span className="orbit-label bottom">{connected ? "සජීවී සබැඳිය" : "සූදානම් තත්ත්වය"}</span>
+            <span className="orbit-label bottom">{connected ? "LIVE LINK" : "STANDBY"}</span>
           </div>
           <div className={`reactor-caption ${visualState}`} aria-live="polite">
             <span className="caption-marker" />
@@ -538,31 +572,32 @@ export default function JarvisConsole() {
           </div>
           <div className={`sound-bars ${visualState}`} aria-hidden="true">{Array.from({ length: 25 }, (_, index) => <i key={index} />)}</div>
 
-          <section className="transcript-panel" aria-label="සජීවී සංවාද පිටපත">
-            <div className="transcript-head"><span>සජීවී සංවාදය</span><span className="transcript-live"><i /> {connected ? "සැසිය ක්‍රියාත්මකයි" : "සැසිය ආරම්භ වී නැත"}</span></div>
+          <section className="transcript-panel" aria-label="Live conversation transcript">
+            <div className="transcript-head"><span>LIVE CONVERSATION</span><span className="transcript-live"><i /> {connected ? "SESSION ACTIVE" : "SESSION NOT STARTED"}</span></div>
             <div className="transcript-row user-row">
-              <span className="transcript-role">ඔබ කියූ දේ</span>
-              <p aria-live="polite">{heardText || "ඔබ කතා කළ විට ඔබේ වචන මෙහි දිස්වනු ඇත."}</p>
+              <span className="transcript-role">YOU SAID</span>
+              <p aria-live="polite">{heardText || "Your words will appear here when you speak."}</p>
             </div>
             <div className="transcript-divider" />
             <div className="transcript-row assistant-row">
-              <span className="transcript-role">JARVIS කියන දේ</span>
-              <p aria-live="polite">{spokenText || "JARVIS පිළිතුරු දෙන විට කථන පිටපත මෙහි පෙන්වනු ඇත."}</p>
+              <span className="transcript-role">JARVIS SAYS</span>
+              <p aria-live="polite">{spokenText || "JARVIS’s spoken reply will appear here."}</p>
             </div>
           </section>
 
-          <aside className="side-rail" aria-label="සංවාද විස්තර">
-            <div className="rail-head"><span>සැසි විස්තර</span><span>01 / 01</span></div>
+          <aside className="side-rail" aria-label="Session details">
+            <div className="rail-head"><span>SESSION DETAILS</span><span>01 / 01</span></div>
             <div className="rail-rule" />
-            <div className="rail-row"><span>භාෂා</span><b>සිංහල / ඉංග්‍රීසි</b></div>
-            <div className="rail-row"><span>හඬ ආකෘතිය</span><b>{LIVE_MODEL}</b></div>
-            <div className="rail-row"><span>සම්බන්ධතාව</span><b className={connected ? "live-value" : ""}>{stateLabels[status]}</b></div>
+            <div className="rail-row"><span>Languages</span><b>English / Sinhala</b></div>
+            <div className="rail-row"><span>Assistant voice</span><b>{assistantVoice === "male" ? "Male · Achird" : "Female · Aoede"}</b></div>
+            <div className="rail-row"><span>Model</span><b>{LIVE_MODEL}</b></div>
+            <div className="rail-row"><span>Connection</span><b className={connected ? "live-value" : ""}>{stateLabels[status]}</b></div>
           </aside>
         </div>
       </section>
 
       <footer className="footer">
-        <span>JARVIS · සජීවී හඬ · පළමු අදියර</span>
+        <span>JARVIS · LIVE VOICE · PHASE ONE</span>
         <span>Google <a href="https://ai.google.dev/gemini-api/docs/live-api" target="_blank" rel="noreferrer">Gemini Live API</a></span>
       </footer>
     </main>

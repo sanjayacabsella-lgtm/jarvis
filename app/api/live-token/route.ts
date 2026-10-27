@@ -4,6 +4,8 @@ import {
   buildSystemInstruction,
   END_OF_SPEECH_SILENCE_MS,
   LIVE_MODEL,
+  normalizeVoicePreference,
+  VOICE_PRESETS,
 } from "@/lib/live-config";
 
 export const runtime = "nodejs";
@@ -53,35 +55,41 @@ function allowTokenRequest(request: Request): boolean {
 }
 
 function safeAddress(value: unknown): string {
-  if (typeof value !== "string") return "සර්";
+  if (typeof value !== "string") return "Sir";
   const normalized = value.replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
-  if (!normalized || normalized.length > 32) return "සර්";
-  if (!/^[\p{L}\p{M}\p{N} .'’_-]+$/u.test(normalized)) return "සර්";
+  if (!normalized || normalized.length > 32) return "Sir";
+  if (!/^[A-Za-z0-9 .'’_-]+$/.test(normalized)) return "Sir";
   return normalized;
 }
 
 export async function POST(request: Request) {
   if (!sameOriginRequest(request)) {
-    return jsonError("මෙම ඉල්ලීම පිළිගත නොහැක.", 403);
+    return jsonError("This request is not allowed.", 403);
   }
 
   if (!allowTokenRequest(request)) {
-    return jsonError("ඉල්ලීම් සීමාව ඉක්මවා ඇත. මිනිත්තුවකින් නැවත උත්සාහ කරන්න.", 429);
+    return jsonError("Request limit reached. Try again in one minute.", 429);
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return jsonError("Server එකේ Gemini API key එක සකසා නැත.", 503);
+    return jsonError("The Gemini API key is not configured on the server.", 503);
   }
 
-  let preferredAddress = "සර්";
+  let preferredAddress = "Sir";
+  let assistantVoice: keyof typeof VOICE_PRESETS = "male";
   try {
     const body: unknown = await request.json();
-    if (body && typeof body === "object" && "preferredAddress" in body) {
-      preferredAddress = safeAddress((body as { preferredAddress?: unknown }).preferredAddress);
+    if (body && typeof body === "object") {
+      if ("preferredAddress" in body) {
+        preferredAddress = safeAddress((body as { preferredAddress?: unknown }).preferredAddress);
+      }
+      if ("assistantVoice" in body) {
+        assistantVoice = normalizeVoicePreference((body as { assistantVoice?: unknown }).assistantVoice);
+      }
     }
   } catch {
-    return jsonError("ඉල්ලීමේ දත්ත කියවිය නොහැක.", 400);
+    return jsonError("The request body could not be read.", 400);
   }
 
   const systemInstruction = buildSystemInstruction(preferredAddress);
@@ -99,6 +107,11 @@ export async function POST(request: Request) {
           config: {
             responseModalities: [Modality.AUDIO],
             systemInstruction: { parts: [{ text: systemInstruction }] },
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: VOICE_PRESETS[assistantVoice] },
+              },
+            },
             inputAudioTranscription: {},
             outputAudioTranscription: {},
             realtimeInputConfig: {
@@ -115,12 +128,13 @@ export async function POST(request: Request) {
       {
         token: token.name,
         model: LIVE_MODEL,
+        assistantVoice,
         systemInstruction,
         expiresAt: token.expireTime,
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } },
     );
   } catch {
-    return jsonError("Gemini Live token එක ලබාගත නොහැකි වුණා. API key සහ quota පරීක්ෂා කරන්න.", 502);
+    return jsonError("Could not create a Gemini Live token. Check the API key and quota.", 502);
   }
 }

@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "JARVIS — සජීවී හඬ සහායක",
-  description: "සජීවී සිංහල සහ ඉංග්‍රීසි හඬ සංවාද සඳහා JARVIS පාලක තිරය.",
+  title: "JARVIS — Live Voice Assistant",
+  description: "A real-time voice assistant powered by Google Gemini Live.",
   applicationName: "JARVIS",
 };
 
@@ -15,7 +15,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="si">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );
