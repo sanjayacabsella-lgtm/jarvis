@@ -99,6 +99,8 @@ export async function POST(request: Request) {
           config: {
             responseModalities: [Modality.AUDIO],
             systemInstruction: { parts: [{ text: systemInstruction }] },
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
             realtimeInputConfig: {
               automaticActivityDetection: {
                 silenceDurationMs: END_OF_SPEECH_SILENCE_MS,

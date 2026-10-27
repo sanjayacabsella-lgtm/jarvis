@@ -3,6 +3,7 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  END_OF_SPEECH_SILENCE_MS,
   INPUT_SAMPLE_RATE,
   LIVE_MODEL,
   OUTPUT_SAMPLE_RATE,
@@ -10,11 +11,15 @@ import {
 
 type ConsoleState = "ready" | "connecting" | "listening" | "thinking" | "speaking" | "error";
 type LiveSession = Awaited<ReturnType<GoogleGenAI["live"]["connect"]>>;
+type Transcript = { text?: string };
 
 type IncomingMessage = {
   serverContent?: {
     interrupted?: boolean;
     turnComplete?: boolean;
+    inputTranscription?: Transcript;
+    interimInputTranscription?: Transcript;
+    outputTranscription?: Transcript;
     modelTurn?: {
       parts?: Array<{
         inlineData?: { data?: string; mimeType?: string };
@@ -33,11 +38,39 @@ type TokenResponse = {
 const stateLabels: Record<ConsoleState, string> = {
   ready: "සූදානම්",
   connecting: "සම්බන්ධ වෙමින්",
-  listening: "අසාගෙන සිටී",
-  thinking: "සිතමින්",
-  speaking: "පිළිතුරු දෙමින්",
+  listening: "ඔබට සවන් දෙමින්",
+  thinking: "පිළිතුර සකස් කරමින්",
+  speaking: "කතා කරමින්",
   error: "සම්බන්ධතාවේ ගැටලුවක්",
 };
+
+const stateDescriptions: Record<ConsoleState, string> = {
+  ready: "හඬ සංවාදය ආරම්භ කිරීමට සූදානම්",
+  connecting: "මයික්‍රෆෝනය සහ සජීවී හඬ සම්බන්ධතාව සකසමින්",
+  listening: "ඔබේ හඬට සවන් දෙමින් සිටී",
+  thinking: "ඔබට පිළිතුර සකස් කරමින් සිටී",
+  speaking: "JARVIS දැන් කතා කරමින් සිටී",
+  error: "සම්බන්ධතාව පරීක්ෂා කර නැවත උත්සාහ කරන්න",
+};
+
+function appendTranscriptChunk(current: string, incoming: string): string {
+  const chunk = incoming.trim();
+  if (!chunk) return current;
+  if (!current) return chunk.slice(-1400);
+  const extendsCurrent = chunk.length > current.length && chunk.startsWith(current) && /[\s.,!?;:…]/u.test(chunk[current.length]);
+  if (extendsCurrent) return chunk.slice(-1400);
+
+  const needsSpace = !/\s$/.test(current) && !/^[\s.,!?;:…]/u.test(chunk);
+  return `${current}${needsSpace ? " " : ""}${chunk}`.slice(-1400);
+}
+
+function combineTranscripts(committed: string, interim: string): string {
+  if (!committed) return interim;
+  if (!interim || interim.startsWith(committed)) return interim || committed;
+  if (committed.startsWith(interim)) return committed;
+  const needsSpace = !/\s$/.test(committed) && !/^[\s.,!?;:…]/u.test(interim);
+  return `${committed}${needsSpace ? " " : ""}${interim}`;
+}
 
 function pcmToBase64(samples: Float32Array, sourceRate: number): string {
   const ratio = sourceRate / INPUT_SAMPLE_RATE;
@@ -72,6 +105,8 @@ export default function JarvisConsole() {
   const [status, setStatus] = useState<ConsoleState>("ready");
   const [preferredAddress, setPreferredAddress] = useState("සර්");
   const [errorMessage, setErrorMessage] = useState("");
+  const [heardText, setHeardText] = useState("");
+  const [spokenText, setSpokenText] = useState("");
   const sessionRef = useRef<LiveSession | null>(null);
   const statusRef = useRef<ConsoleState>("ready");
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -85,16 +120,29 @@ export default function JarvisConsole() {
   const userSpeakingRef = useRef(false);
   const silenceTimerRef = useRef<number | null>(null);
   const reactorRef = useRef<HTMLDivElement | null>(null);
+  const heardCommittedRef = useRef("");
+  const heardInterimRef = useRef("");
+  const userTranscriptFinalizedRef = useRef(false);
+  const spokenTextRef = useRef("");
 
   const updateStatus = useCallback((next: ConsoleState) => {
     statusRef.current = next;
     setStatus(next);
   }, []);
 
+  const resetTranscripts = useCallback(() => {
+    heardCommittedRef.current = "";
+    heardInterimRef.current = "";
+    userTranscriptFinalizedRef.current = false;
+    spokenTextRef.current = "";
+    setHeardText("");
+    setSpokenText("");
+  }, []);
+
   const clearPlayback = useCallback(() => {
     for (const source of activeSourcesRef.current) {
       source.onended = null;
-      try { source.stop(); } catch { /* A source may already have ended. */ }
+      try { source.stop(); } catch { /* ශබ්ද මූලාශ්‍රය දැනටමත් අවසන් වී තිබිය හැක. */ }
       source.disconnect();
     }
     activeSourcesRef.current = [];
@@ -117,7 +165,7 @@ export default function JarvisConsole() {
     micContextRef.current = null;
     outputContextRef.current = null;
     analyserRef.current = null;
-    reactorRef.current?.style.setProperty("--audio-level", "0.04");
+    reactorRef.current?.style.setProperty("--audio-level", "0.035");
     if (micContext && micContext.state !== "closed") void micContext.close();
     if (outputContext && outputContext.state !== "closed") void outputContext.close();
   }, []);
@@ -158,14 +206,16 @@ export default function JarvisConsole() {
   const releaseSession = useCallback(() => {
     const session = sessionRef.current;
     sessionRef.current = null;
-    try { session?.sendRealtimeInput({ audioStreamEnd: true }); } catch { /* Session may already be closed. */ }
-    try { session?.close(); } catch { /* Session may already be closed. */ }
+    try { session?.sendRealtimeInput({ audioStreamEnd: true }); } catch { /* සම්බන්ධතාව අවසන් වී තිබිය හැක. */ }
+    try { session?.close(); } catch { /* සම්බන්ධතාව දැනටමත් වසා තිබිය හැක. */ }
     clearPlayback();
     releaseAudio();
-  }, [clearPlayback, releaseAudio]);
+    resetTranscripts();
+  }, [clearPlayback, releaseAudio, resetTranscripts]);
 
   const startSession = useCallback(async () => {
     setErrorMessage("");
+    resetTranscripts();
     updateStatus("connecting");
 
     try {
@@ -198,7 +248,7 @@ export default function JarvisConsole() {
       };
 
       if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("මෙම browser එක microphone භාවිතයට සහාය නොදක්වයි.");
+        throw new Error("මෙම බ්‍රවුසරයෙන් මයික්‍රෆෝනය භාවිත කළ නොහැක.");
       }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -213,7 +263,7 @@ export default function JarvisConsole() {
       });
       const tokenData = (await tokenResponse.json()) as TokenResponse;
       if (!tokenResponse.ok || !tokenData.token || !tokenData.systemInstruction) {
-        throw new Error(tokenData.error || "Live session එක ආරම්භ කළ නොහැකි වුණා.");
+        throw new Error(tokenData.error || "සජීවී හඬ සංවාදය ආරම්භ කළ නොහැකි විය.");
       }
 
       const ai = new GoogleGenAI({ apiKey: tokenData.token });
@@ -222,9 +272,11 @@ export default function JarvisConsole() {
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: { parts: [{ text: tokenData.systemInstruction }] },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
           realtimeInputConfig: {
             automaticActivityDetection: {
-              silenceDurationMs: 650,
+              silenceDurationMs: END_OF_SPEECH_SILENCE_MS,
             },
           },
         },
@@ -234,6 +286,23 @@ export default function JarvisConsole() {
             const message = rawMessage as IncomingMessage;
             const content = message.serverContent;
             if (!content) return;
+
+            const interimText = content.interimInputTranscription?.text;
+            if (interimText && !userTranscriptFinalizedRef.current) {
+              heardInterimRef.current = interimText.trim();
+              setHeardText(combineTranscripts(heardCommittedRef.current, heardInterimRef.current));
+            }
+            const finalText = content.inputTranscription?.text;
+            if (finalText) {
+              heardCommittedRef.current = appendTranscriptChunk(heardCommittedRef.current, finalText);
+              heardInterimRef.current = "";
+              userTranscriptFinalizedRef.current = true;
+              setHeardText(heardCommittedRef.current);
+            }
+            if (content.outputTranscription?.text) {
+              spokenTextRef.current = appendTranscriptChunk(spokenTextRef.current, content.outputTranscription.text);
+              setSpokenText(spokenTextRef.current);
+            }
 
             if (content.interrupted) {
               clearPlayback();
@@ -253,13 +322,14 @@ export default function JarvisConsole() {
             }
           },
           onerror: () => {
-            setErrorMessage("සජීවී හඬ සම්බන්ධතාවේ ගැටලුවක් ඇති වුණා. නැවත සම්බන්ධ කරන්න.");
+            setErrorMessage("සජීවී හඬ සම්බන්ධතාවයේ ගැටලුවක් ඇති විය. නැවත සම්බන්ධ කරන්න.");
             releaseSession();
             updateStatus("error");
           },
           onclose: () => {
             clearPlayback();
             releaseAudio();
+            resetTranscripts();
             sessionRef.current = null;
             if (statusRef.current !== "error") updateStatus("ready");
           },
@@ -284,15 +354,26 @@ export default function JarvisConsole() {
         reactorRef.current?.style.setProperty("--audio-level", String(Math.min(1, rms * 7)));
 
         if (rms > 0.025) {
+          if (!userSpeakingRef.current) {
+            heardCommittedRef.current = "";
+            heardInterimRef.current = "";
+            userTranscriptFinalizedRef.current = false;
+            spokenTextRef.current = "";
+            setHeardText("");
+            setSpokenText("");
+          }
           if (statusRef.current === "thinking") updateStatus("listening");
           userSpeakingRef.current = true;
-          if (silenceTimerRef.current !== null) window.clearTimeout(silenceTimerRef.current);
-        } else if (userSpeakingRef.current) {
-          if (silenceTimerRef.current !== null) window.clearTimeout(silenceTimerRef.current);
+          if (silenceTimerRef.current !== null) {
+            window.clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = null;
+          }
+        } else if (userSpeakingRef.current && silenceTimerRef.current === null) {
           silenceTimerRef.current = window.setTimeout(() => {
+            silenceTimerRef.current = null;
             userSpeakingRef.current = false;
             if (statusRef.current === "listening") updateStatus("thinking");
-          }, 650);
+          }, END_OF_SPEECH_SILENCE_MS);
         }
 
         const currentSession = sessionRef.current;
@@ -302,7 +383,7 @@ export default function JarvisConsole() {
               audio: { data: pcmToBase64(samples, micContext.sampleRate), mimeType: `audio/pcm;rate=${INPUT_SAMPLE_RATE}` },
             });
           } catch {
-            setErrorMessage("Microphone audio එක Live API වෙත යැවිය නොහැකි වුණා.");
+            setErrorMessage("මයික්‍රෆෝනයේ හඬ සජීවී සේවාව වෙත යැවිය නොහැකි විය.");
             releaseSession();
             updateStatus("error");
           }
@@ -314,12 +395,12 @@ export default function JarvisConsole() {
       updateStatus("listening");
       window.localStorage.setItem("jarvis-preferred-address", preferredAddress.trim() || "සර්");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "සම්බන්ධතාව ආරම්භ කළ නොහැකි වුණා.";
+      const message = error instanceof Error ? error.message : "සම්බන්ධතාව ආරම්භ කළ නොහැකි විය.";
       setErrorMessage(message);
       releaseSession();
       updateStatus("error");
     }
-  }, [clearPlayback, playAudioChunk, preferredAddress, releaseAudio, releaseSession, updateStatus]);
+  }, [playAudioChunk, preferredAddress, releaseAudio, releaseSession, resetTranscripts, updateStatus, clearPlayback]);
 
   useEffect(() => {
     const savedAddress = window.localStorage.getItem("jarvis-preferred-address");
@@ -332,7 +413,7 @@ export default function JarvisConsole() {
       for (const context of [micContextRef.current, outputContextRef.current]) {
         if (context?.state === "suspended") {
           void context.resume().catch(() => {
-            setErrorMessage("Browser audio එක නවතා ඇත. නැවත සම්බන්ධ කර බලන්න.");
+            setErrorMessage("බ්‍රවුසරයේ ශබ්දය නවතා ඇත. නැවත සම්බන්ධ කර බලන්න.");
             releaseSession();
             updateStatus("error");
           });
@@ -372,16 +453,18 @@ export default function JarvisConsole() {
 
   return (
     <main className="shell">
+      <div className="hud-corner hud-corner-top" aria-hidden="true" />
+      <div className="hud-corner hud-corner-bottom" aria-hidden="true" />
       <header className="topbar">
         <div className="brand" aria-label="JARVIS">
-          <span className="brand-mark" aria-hidden="true" />
+          <span className="brand-mark" aria-hidden="true"><i /><b /></span>
           <div>
             <span className="brand-name">JARVIS</span>
-            <span className="brand-sub">VOICE INTERFACE / 01</span>
+            <span className="brand-sub">සජීවී හඬ සහායක</span>
           </div>
         </div>
-        <div className="phase-tag"><b>PHASE 01</b><span>LIVE AUDIO</span></div>
-        <div className={`connection-badge ${connected ? "online" : busy ? "busy" : ""}`} aria-live="polite">
+        <div className="phase-tag"><b>01</b><span>පළමු අදියර · සජීවී හඬ</span></div>
+        <div className={`connection-badge ${connected ? "online" : busy ? "busy" : status === "error" ? "fault" : ""}`} aria-live="polite">
           <span className="status-dot" aria-hidden="true" />
           {stateLabels[status]}
         </div>
@@ -389,14 +472,18 @@ export default function JarvisConsole() {
 
       <section className="content">
         <div className="intro">
-          <div className="kicker">PERSONAL VOICE INTERFACE · GEMINI LIVE</div>
-          <h1>කතා කරන්න.<br /><span>මම අහගෙන.</span></h1>
+          <div className="kicker"><span className="kicker-line" /> පුද්ගලික හඬ පාලකය</div>
+          <h1>ඔබ කතා කරන්න.<br /><span>JARVIS සවන් දෙයි.</span></h1>
           <p className="intro-copy">
-            Sinhala හෝ English—ඔබ කතා කරන භාෂාවෙන්ම පිළිතුරු දෙන්නම්. මේ පළමු අදියරේදී JARVIS සජීවී හඬ සංවාදයට සූදානම්.
+            සිංහලෙන් හෝ ඉංග්‍රීසියෙන් කතා කරන්න. ඔබ කතා කරන අතරතුර අසාගත් දේත්, JARVIS පිළිතුරු දෙන විට එහි වචනත් මෙහි පෙන්වයි.
           </p>
 
           <div className="voice-card">
-            <label className="field-label" htmlFor="preferred-address">ඔබට අමතන්න කැමති විදිහ</label>
+            <div className="voice-card-head">
+              <span className="card-index">01 / හඬ සැකසුම</span>
+              <span className="secure-tag"><i /> පුද්ගලික සැකසුම</span>
+            </div>
+            <label className="field-label" htmlFor="preferred-address">ඔබට අමතන්න කැමති නම</label>
             <div className="address-row">
               <input
                 id="preferred-address"
@@ -404,12 +491,12 @@ export default function JarvisConsole() {
                 value={preferredAddress}
                 onChange={(event) => setPreferredAddress(event.target.value.slice(0, 32))}
                 maxLength={32}
-                placeholder="උදා: සර්, නම"
+                placeholder="උදාහරණය: සර්, නම"
                 autoComplete="off"
                 disabled={connected || busy}
               />
             </div>
-            <p className="field-hint">මෙම තේරීම මෙම browser එකේ පමණක් සුරැකේ.</p>
+            <p className="field-hint">මෙම නම මෙම බ්‍රවුසරයේ පමණක් සුරැකේ.</p>
             <div className="action-row">
               {!connected ? (
                 <button className="primary-button" onClick={startSession} disabled={busy}>
@@ -419,41 +506,64 @@ export default function JarvisConsole() {
               ) : (
                 <button className="quiet-button" onClick={releaseSession}>සංවාදය අවසන් කරන්න</button>
               )}
+              <span className="permission-hint">ආරම්භයේදී microphone අවසරය දෙන්න</span>
             </div>
             {errorMessage && <p className="error-note" role="alert">{errorMessage}</p>}
           </div>
 
-          <p className="privacy-note">
-            ඔබේ හඬ සජීවීව Google Gemini Live API වෙත යවයි. මෙම app එක හඬ හෝ පිටපතක් ගබඩා නොකරයි. ඔබ තෝරාගත් ආමන්ත්‍රණය browser එකේ සුරැකෙන අතර session එක ආරම්භයේදී යවයි. Google සේවාවේ වත්මන් පෞද්ගලිකත්ව කොන්දේසි සහ quota සීමා පරීක්ෂා කරන්න.
-          </p>
+          <div className="privacy-note">
+            ඔබේ හඬ සජීවීව Google Gemini Live API වෙත යවයි. මෙම යෙදුම හඬ හෝ සංවාද පිටපත් ගබඩා නොකරයි. පිටපත් දිස්වන්නේ මෙම සජීවී සැසියේදී පමණි.
+          </div>
         </div>
 
         <div className="reactor-column">
+          <div className="reactor-topline"><span>ශබ්ද සබැඳිය</span><i /><span>{connected ? "සක්‍රීයයි" : "සූදානම්"}</span></div>
           <div ref={reactorRef} className={`reactor-shell ${visualState}`} aria-hidden="true">
+            <div className="reactor-halo" />
             <div className="reactor-ring outer" />
+            <div className="reactor-ring segmented" />
             <div className="reactor-ring mid" />
             <div className="reactor-ring inner" />
             <div className="reactor-tick" />
-            <span className="orbit-label top">J·A·R·V·I·S / LIVE</span>
-            <div className="reactor-core" />
-            <span className="orbit-label bottom">AUDIO LINK · {status === "ready" || status === "error" ? "STANDBY" : "ACTIVE"}</span>
+            <div className="reactor-cross reactor-cross-x" />
+            <div className="reactor-cross reactor-cross-y" />
+            <span className="orbit-label top">J · A · R · V · I · S</span>
+            <div className="reactor-core"><span>J</span></div>
+            <span className="orbit-label bottom">{connected ? "සජීවී සබැඳිය" : "සූදානම් තත්ත්වය"}</span>
           </div>
-          <div className="reactor-caption"><strong>{stateLabels[status]}</strong> · {connected ? "හඬ සබැඳිය සක්‍රීයයි" : "සබැඳිය විවෘත කිරීමට සූදානම්"}</div>
-          <div className="sound-bars" aria-hidden="true">{Array.from({ length: 13 }, (_, index) => <i key={index} />)}</div>
+          <div className={`reactor-caption ${visualState}`} aria-live="polite">
+            <span className="caption-marker" />
+            <strong>{stateLabels[status]}</strong>
+            <span>{stateDescriptions[status]}</span>
+          </div>
+          <div className={`sound-bars ${visualState}`} aria-hidden="true">{Array.from({ length: 25 }, (_, index) => <i key={index} />)}</div>
 
-          <aside className="side-rail" aria-label="සංවාද තත්ත්වය">
-            <div className="rail-head"><span>SESSION TELEMETRY</span><span>01 / 01</span></div>
+          <section className="transcript-panel" aria-label="සජීවී සංවාද පිටපත">
+            <div className="transcript-head"><span>සජීවී සංවාදය</span><span className="transcript-live"><i /> {connected ? "සැසිය ක්‍රියාත්මකයි" : "සැසිය ආරම්භ වී නැත"}</span></div>
+            <div className="transcript-row user-row">
+              <span className="transcript-role">ඔබ කියූ දේ</span>
+              <p aria-live="polite">{heardText || "ඔබ කතා කළ විට ඔබේ වචන මෙහි දිස්වනු ඇත."}</p>
+            </div>
+            <div className="transcript-divider" />
+            <div className="transcript-row assistant-row">
+              <span className="transcript-role">JARVIS කියන දේ</span>
+              <p aria-live="polite">{spokenText || "JARVIS පිළිතුරු දෙන විට කථන පිටපත මෙහි පෙන්වනු ඇත."}</p>
+            </div>
+          </section>
+
+          <aside className="side-rail" aria-label="සංවාද විස්තර">
+            <div className="rail-head"><span>සැසි විස්තර</span><span>01 / 01</span></div>
             <div className="rail-rule" />
-            <div className="rail-row"><span>භාෂා</span><b>SINHALA + ENGLISH</b></div>
-            <div className="rail-row"><span>Live model</span><b>{LIVE_MODEL}</b></div>
+            <div className="rail-row"><span>භාෂා</span><b>සිංහල / ඉංග්‍රීසි</b></div>
+            <div className="rail-row"><span>හඬ ආකෘතිය</span><b>{LIVE_MODEL}</b></div>
             <div className="rail-row"><span>සම්බන්ධතාව</span><b className={connected ? "live-value" : ""}>{stateLabels[status]}</b></div>
           </aside>
         </div>
       </section>
 
       <footer className="footer">
-        <span>JARVIS · LIVE VOICE · PHASE 01</span>
-        <span>සජීවී සංවාදය · <a href="https://ai.google.dev/gemini-api/docs/live-api" target="_blank" rel="noreferrer">Gemini Live API</a></span>
+        <span>JARVIS · සජීවී හඬ · පළමු අදියර</span>
+        <span>Google <a href="https://ai.google.dev/gemini-api/docs/live-api" target="_blank" rel="noreferrer">Gemini Live API</a></span>
       </footer>
     </main>
   );

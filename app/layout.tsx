@@ -4,12 +4,12 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "JARVIS — සජීවී හඬ සහායක",
-  description: "Sinhala සහ English හඬ සංවාද සඳහා පුද්ගලික JARVIS interface එක.",
+  description: "සජීවී සිංහල සහ ඉංග්‍රීසි හඬ සංවාද සඳහා JARVIS පාලක තිරය.",
   applicationName: "JARVIS",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#070c12",
+  themeColor: "#03070d",
   colorScheme: "dark",
 };
 

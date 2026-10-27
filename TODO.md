@@ -1,21 +1,27 @@
-# JARVIS — Phase 1 TODO
+# JARVIS — පළමු අදියරේ වැඩ ලැයිස්තුව
 
-## සජීවී Sinhala/English හඬ සංවාදය
-- [x] පරිශීලකයාට Sinhala සහ English මිශ්‍රව කතා කළ හැකි සජීවී ද්විමාර්ගී හඬ සංවාදය සපයන්න.
-- [x] Browser එකෙන් Google Gemini Live API හි `gemini-3.8-live` model එකට සෘජු WebSocket session එකක් සම්බන්ධ කරන්න.
-- [ ] Browser microphone audio capture කර stream කරන්න; model audio output එක අඛණ්ඩව playback කරන්න. Code එක build/typecheck සමත් වුණත් browser microphone හරහා end-to-end සංවාදය පරීක්ෂා කර නැත.
-- [x] VAD සහ barge-in/interrupt හැසිරවීම සපයන්න; model `interrupted` event එක ලැබුණු විට දැනට තිබෙන playback audio queue එක වහාම ඉවත් කරන්න.
+## සජීවී සිංහල සහ ඉංග්‍රීසි හඬ සංවාදය
+- [x] පරිශීලකයාට සිංහලෙන් හෝ ඉංග්‍රීසියෙන් කතා කළ හැකි සජීවී ද්විමාර්ගී හඬ සංවාදය සපයන්න.
+- [x] බ්‍රවුසරයෙන් Google Gemini Live API හි `gemini-3.8-live` ආකෘතියට සෘජු WebSocket සම්බන්ධතාවක් සපයන්න.
+- [ ] බ්‍රවුසරයේ microphone හරහා හඬ ලබාගෙන සජීවීව යවන්න; ආකෘතියේ හඬ පිළිතුරු නොකැඩී වාදනය කරන්න. Code එක build සමත් වුවත්, සැබෑ microphone එකකින් අවසානය දක්වා සංවාදය තවම පරීක්ෂා කර නැත.
+- [x] VAD සහ කතා මැද බාධා කිරීම සපයන්න; ආකෘතියෙන් `interrupted` event එක ලැබුණු විට දැනට වාදනය වන ශබ්ද පෝලිම වහාම හිස් කරන්න.
 
-## ආරක්ෂිත Live API token සැපයීම
-- [x] Google API key හෙළි නොකර browser එකට කෙටි කාලීන, සීමා කළ ephemeral token එකක් ලබාදෙන server endpoint එකක් සපයන්න.
-- [x] Google API key සහ වෙනත් secrets server-side environment variables තුළ පමණක් තබන්න; public GitHub repository එකේ secrets කිසිවක් නොතිබිය යුතුය.
-- [x] Source project එක Vercel වෙත deploy කිරීමට සූදානම් කරන්න. Vercel account එකකට deploy කිරීම මෙහි සිදු කර නැත.
+## ආරක්ෂිත සජීවී API token සැපයීම
+- [x] Google API key එක හෙළි නොකර, බ්‍රවුසරයට කෙටි කාලීන හා සීමා කළ token එකක් ලබාදෙන server endpoint එකක් සපයන්න; endpoint එකෙන් token එක සාර්ථකව නිකුත් වන බව පරීක්ෂා කර ඇත.
+- [x] Google API key සහ අනෙකුත් රහස් අගයන් server-side environment variables තුළ පමණක් තබන්න; public GitHub repository එකට රහස් අගයන් නොයවන්න.
+- [x] Source project එක Vercel වෙත deploy කිරීමට සූදානම් කරන්න. පරිශීලකයා Vercel වෙත deploy කළ බව දන්වා ඇත.
 
-## JARVIS persona සහ HUD
-- [x] JARVIS සන්සුන්, සැහැල්ලු හාස්‍යයක් ඇති, කෙටි පිළිතුරු දෙන, පක්ෂපාතී සහායක persona එකකින් කතා කළ යුතුය.
+## JARVIS හඬ සහ පිළිතුරු
+- [x] JARVIS සන්සුන්, සැහැල්ලු හාස්‍යයක් ඇති, පක්ෂපාතී සහායක හඬකින් පිළිතුරු දෙන්න.
+- [x] සාමාන්‍ය ප්‍රශ්නයකට සාමාන්‍ය දිගකින්, ප්‍රයෝජනවත් විස්තර සහිත පිළිතුරක් දෙන්න; ඉතා කෙටි වාක්‍යවලට සීමා නොවන්න; අමතර විස්තර ඉල්ලූ විට තව පැහැදිලි කරන්න.
+- [x] කතා අවසන් වූ පසු දිගු හැඳින්වීමක් නොකර පිළිතුර ඉක්මනින් ආරම්භ කරන්න; VAD නිහඬ කාලය 650 ms සිට 450 ms දක්වා අඩු කර ඇත. සැබෑ ප්‍රමාදය ජාලය සහ සේවා ප්‍රතිචාරය මතද රඳා පවතී.
 - [x] පරිශීලකයා කැමති ආමන්ත්‍රණය තෝරාගැනීමට සැකසුමක් දෙන්න.
-- [x] හඬට ප්‍රතිචාර දක්වන arc-reactor-inspired orb එකක් HUD එකේ පෙන්වන්න.
-- [x] HUD එක listening/thinking/speaking indicators, boot chime සහ session connection state පෙන්විය යුතුය.
 
-## අදියර සීමාව
-- [x] Phase 1 තුළ tools, Groq brain bridge, memory, local computer agent, wake word, PWA install flow, සහ fallback STT/TTS ඇතුළත් නොකරන්න.
+## JARVIS ආභාසිත දෘශ්‍ය පාලක තිරය
+- [x] ප්‍රතික්‍රියාකාරක-වළල්ලක්, අනාගතමය පාලක පුවරුවක්, පැහැදිලි වර්ණ සහිත හඬ-ප්‍රතිචාරී මධ්‍යම ආලෝක කේන්ද්‍රයක් යොදා JARVIS-ආභාසිත පෙනුමක් සපයන්න.
+- [x] “අසාගෙන සිටී”, “පිළිතුර සකස් කරමින්”, “කතා කරමින්” සහ “සම්බන්ධ වෙමින්” යන තත්ත්ව පරිශීලකයාට වහාම හඳුනාගත හැකි ලෙස පෙන්වන්න.
+- [x] පරිශීලකයාගේ අවසන් හඬ පිටපත සහ JARVIS කතා කරන පිටපත වත්මන් සංවාදයේදී පමණක් තිරය මත පෙන්වන්න; සංවාදය අවසන් වූ පසු ස්ථිරව ගබඩා නොකරන්න.
+- [x] පළමු සම්බන්ධතාවයේ boot chime එකක් සහ හඬට ප්‍රතිචාර දක්වන orb එකක් සපයන්න.
+
+## පළමු අදියරේ සීමාව
+- [x] මෙම අදියරට tools, Groq bridge, memory, පරිගණක පාලක agent, wake word, PWA install flow හෝ fallback STT/TTS ඇතුළත් නොකරන්න.
