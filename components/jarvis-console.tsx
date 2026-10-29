@@ -527,8 +527,8 @@ export default function JarvisConsole() {
                 }}
                 disabled={connected || busy}
               >
-                <option value="male">Male — Achird · Warm</option>
-                <option value="female">Female — Aoede · Breezy</option>
+                <option value="male">Warm voice</option>
+                <option value="female">Soft voice</option>
               </select>
             </div>
             <div className="action-row">
@@ -546,7 +546,7 @@ export default function JarvisConsole() {
           </div>
 
           <div className="privacy-note">
-            Your voice is streamed to Google Gemini Live. This app does not store audio or transcripts; transcripts appear only during this live session.
+            Your voice is streamed through the live assistant core. This app does not store audio or transcripts; transcripts appear only during this live session.
           </div>
         </div>
 
@@ -589,8 +589,8 @@ export default function JarvisConsole() {
             <div className="rail-head"><span>SESSION DETAILS</span><span>01 / 01</span></div>
             <div className="rail-rule" />
             <div className="rail-row"><span>Languages</span><b>English / Sinhala</b></div>
-            <div className="rail-row"><span>Assistant voice</span><b>{assistantVoice === "male" ? "Male · Achird" : "Female · Aoede"}</b></div>
-            <div className="rail-row"><span>Model</span><b>{LIVE_MODEL}</b></div>
+            <div className="rail-row"><span>Assistant voice</span><b>{assistantVoice === "male" ? "Warm" : "Soft"}</b></div>
+            <div className="rail-row"><span>Core</span><b>JARVIS Core</b></div>
             <div className="rail-row"><span>Connection</span><b className={connected ? "live-value" : ""}>{stateLabels[status]}</b></div>
           </aside>
         </div>
@@ -598,7 +598,7 @@ export default function JarvisConsole() {
 
       <footer className="footer">
         <span>JARVIS · LIVE VOICE · PHASE ONE</span>
-        <span>Google <a href="https://ai.google.dev/gemini-api/docs/live-api" target="_blank" rel="noreferrer">Gemini Live API</a></span>
+        <span>Secure voice core</span>
       </footer>
     </main>
   );
