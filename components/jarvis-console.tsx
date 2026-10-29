@@ -39,6 +39,12 @@ type TokenResponse = {
   error?: string;
 };
 
+type RepoStatusState = {
+  text: string;
+  loading: boolean;
+  error: string | null;
+};
+
 const stateLabels: Record<ConsoleState, string> = {
   ready: "Ready",
   connecting: "Connecting",
@@ -116,6 +122,7 @@ export default function JarvisConsole() {
   const [errorMessage, setErrorMessage] = useState("");
   const [heardText, setHeardText] = useState("");
   const [spokenText, setSpokenText] = useState("");
+  const [repoStatus, setRepoStatus] = useState<RepoStatusState>({ text: "Repository status will appear here.", loading: false, error: null });
   const sessionRef = useRef<LiveSession | null>(null);
   const statusRef = useRef<ConsoleState>("ready");
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -151,7 +158,7 @@ export default function JarvisConsole() {
   const clearPlayback = useCallback(() => {
     for (const source of activeSourcesRef.current) {
       source.onended = null;
-      try { source.stop(); } catch { /* The audio source may already have ended. */ }
+      try { source.stop(); } catch { /* audio source may already be closed */ }
       source.disconnect();
     }
     activeSourcesRef.current = [];
@@ -215,12 +222,30 @@ export default function JarvisConsole() {
   const releaseSession = useCallback(() => {
     const session = sessionRef.current;
     sessionRef.current = null;
-    try { session?.sendRealtimeInput({ audioStreamEnd: true }); } catch { /* The connection may already be closed. */ }
-    try { session?.close(); } catch { /* The session may already be closed. */ }
+    try { session?.sendRealtimeInput({ audioStreamEnd: true }); } catch { /* session may already be closed */ }
+    try { session?.close(); } catch { /* session may already be closed */ }
     clearPlayback();
     releaseAudio();
     resetTranscripts();
   }, [clearPlayback, releaseAudio, resetTranscripts]);
+
+  const checkRepoStatus = useCallback(async () => {
+    try {
+      setRepoStatus({ text: "Checking repository status...", loading: true, error: null });
+      const response = await fetch("/api/github-read?repo=sanjayacabsella-lgtm/jarvis&readme=0&actions=0", { cache: "no-store" });
+      const payload = await response.json();
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || "Repository status check failed.");
+      }
+
+      const summary = payload.summary || "Repository is available.";
+      setRepoStatus({ text: summary, loading: false, error: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Repository status check failed.";
+      setRepoStatus({ text: "Repository status unavailable.", loading: false, error: message });
+    }
+  }, []);
 
   const startSession = useCallback(async () => {
     setErrorMessage("");
@@ -540,7 +565,15 @@ export default function JarvisConsole() {
               ) : (
                 <button className="quiet-button" onClick={releaseSession}>End session</button>
               )}
+              <button className="quiet-button" onClick={checkRepoStatus} disabled={busy || status === "connecting"}>
+                Check repo status
+              </button>
               <span className="permission-hint">Allow microphone access when prompted.</span>
+            </div>
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+              <p style={{ margin: 0, fontSize: 12, opacity: 0.78 }}>
+                {repoStatus.loading ? "Checking repository status..." : repoStatus.error ? repoStatus.error : repoStatus.text}
+              </p>
             </div>
             {errorMessage && <p className="error-note" role="alert">{errorMessage}</p>}
           </div>
