@@ -239,8 +239,7 @@ export default function JarvisConsole() {
         throw new Error(payload?.error || "Repository status check failed.");
       }
 
-      const summary = payload.summary || "Repository is available.";
-      setRepoStatus({ text: summary, loading: false, error: null });
+      setRepoStatus({ text: payload.summary || "Repository is available.", loading: false, error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Repository status check failed.";
       setRepoStatus({ text: "Repository status unavailable.", loading: false, error: message });
@@ -565,7 +564,7 @@ export default function JarvisConsole() {
               ) : (
                 <button className="quiet-button" onClick={releaseSession}>End session</button>
               )}
-              <button className="quiet-button" onClick={checkRepoStatus} disabled={busy || status === "connecting"}>
+              <button className="quiet-button" onClick={checkRepoStatus} disabled={busy}>
                 Check repo status
               </button>
               <span className="permission-hint">Allow microphone access when prompted.</span>
