@@ -5,12 +5,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   END_OF_SPEECH_SILENCE_MS,
   INPUT_SAMPLE_RATE,
+  LIVE_IDLE_TIMEOUT_MS,
   LIVE_MODEL,
+  LIVE_TOOLS,
+  MAX_VIDEO_SECONDS,
   OUTPUT_SAMPLE_RATE,
   normalizeVoicePreference,
   VOICE_PRESETS,
   type VoiceGender,
 } from "@/lib/live-config";
+import { isScreenShareAvailable, startFrameCapture, type FrameCaptureHandle, type FrameSource } from "@/lib/frame-capture";
+import { haptic, playCue } from "@/lib/sfx";
+import { isWakeWordSupported, startWakeWord, type WakeWordHandle } from "@/lib/wake-word";
 
 type ConsoleState = "ready" | "connecting" | "listening" | "thinking" | "speaking" | "error";
 type LiveSession = Awaited<ReturnType<GoogleGenAI["live"]["connect"]>>;
@@ -36,6 +42,7 @@ type TokenResponse = {
   model?: string;
   assistantVoice?: VoiceGender;
   systemInstruction?: string;
+  features?: { affectiveDialog?: boolean; proactiveAudio?: boolean };
   error?: string;
 };
 
@@ -62,6 +69,18 @@ const stateDescriptions: Record<ConsoleState, string> = {
   speaking: "JARVIS is speaking",
   error: "Check your connection and try again",
 };
+
+type GreetingLanguage = "English" | "Sinhala";
+type StartTrigger = "manual" | "wake";
+type WakeLockSentinelLike = { release: () => Promise<void> };
+type NavigatorWithWakeLock = Navigator & { wakeLock?: { request: (type: "screen") => Promise<WakeLockSentinelLike> } };
+
+const DEFAULT_REPO = process.env.NEXT_PUBLIC_JARVIS_REPO || "sanjayacabsella-lgtm/jarvis";
+
+function authHeaders(code: string): Record<string, string> {
+  const trimmed = code.trim();
+  return trimmed ? { "x-jarvis-code": trimmed } : {};
+}
 
 function cleanPreferredAddress(value: string): string {
   return value.replace(/[^A-Za-z0-9 .'’_-]/g, "").slice(0, 32);
@@ -123,6 +142,13 @@ export default function JarvisConsole() {
   const [heardText, setHeardText] = useState("");
   const [spokenText, setSpokenText] = useState("");
   const [repoStatus, setRepoStatus] = useState<RepoStatusState>({ text: "Repository status will appear here.", loading: false, error: null });
+  const [accessCode, setAccessCode] = useState("");
+  const [greetingLanguage, setGreetingLanguage] = useState<GreetingLanguage>("English");
+  const [standby, setStandby] = useState(false);
+  const [wakeSupported, setWakeSupported] = useState(false);
+  const [shareMode, setShareMode] = useState<FrameSource | null>(null);
+  const [shareSeconds, setShareSeconds] = useState(0);
+  const [screenShareAvailable, setScreenShareAvailable] = useState(false);
   const sessionRef = useRef<LiveSession | null>(null);
   const statusRef = useRef<ConsoleState>("ready");
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -140,6 +166,9 @@ export default function JarvisConsole() {
   const heardInterimRef = useRef("");
   const userTranscriptFinalizedRef = useRef(false);
   const spokenTextRef = useRef("");
+  const captureRef = useRef<FrameCaptureHandle | null>(null);
+  const lastActivityRef = useRef(Date.now());
+  const startSessionRef = useRef<(trigger?: StartTrigger) => Promise<void>>(async () => undefined);
 
   const updateStatus = useCallback((next: ConsoleState) => {
     statusRef.current = next;
@@ -190,6 +219,7 @@ export default function JarvisConsole() {
     const context = outputContextRef.current;
     const analyser = analyserRef.current;
     if (!context || !analyser) return;
+    lastActivityRef.current = Date.now();
 
     const bytes = decodeBase64(encodedAudio);
     const sampleCount = Math.floor(bytes.length / 2);
@@ -222,6 +252,8 @@ export default function JarvisConsole() {
   const releaseSession = useCallback(() => {
     const session = sessionRef.current;
     sessionRef.current = null;
+    captureRef.current?.stop();
+    captureRef.current = null;
     try { session?.sendRealtimeInput({ audioStreamEnd: true }); } catch { /* session may already be closed */ }
     try { session?.close(); } catch { /* session may already be closed */ }
     clearPlayback();
@@ -232,7 +264,10 @@ export default function JarvisConsole() {
   const checkRepoStatus = useCallback(async () => {
     try {
       setRepoStatus({ text: "Checking repository status...", loading: true, error: null });
-      const response = await fetch("/api/github-read?repo=sanjayacabsella-lgtm/jarvis&readme=0&actions=0", { cache: "no-store" });
+      const response = await fetch(`/api/github-read?repo=${encodeURIComponent(DEFAULT_REPO)}&readme=0&actions=0`, {
+        cache: "no-store",
+        headers: authHeaders(accessCode),
+      });
       const payload = await response.json();
 
       if (!response.ok || !payload?.ok) {
@@ -244,9 +279,9 @@ export default function JarvisConsole() {
       const message = error instanceof Error ? error.message : "Repository status check failed.";
       setRepoStatus({ text: "Repository status unavailable.", loading: false, error: message });
     }
-  }, []);
+  }, [accessCode]);
 
-  const startSession = useCallback(async () => {
+  const startSession = useCallback(async (trigger: StartTrigger = "manual") => {
     setErrorMessage("");
     resetTranscripts();
     updateStatus("connecting");
@@ -290,22 +325,33 @@ export default function JarvisConsole() {
 
       const tokenResponse = await fetch("/api/live-token", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders(accessCode) },
         cache: "no-store",
-        body: JSON.stringify({ preferredAddress: preferredAddress.trim() || "Sir", assistantVoice }),
+        body: JSON.stringify({
+          preferredAddress: preferredAddress.trim() || "Sir",
+          assistantVoice,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
       });
       const tokenData = (await tokenResponse.json()) as TokenResponse;
       if (!tokenResponse.ok || !tokenData.token || !tokenData.systemInstruction) {
         throw new Error(tokenData.error || "Could not start the live voice session.");
       }
 
-      const ai = new GoogleGenAI({ apiKey: tokenData.token });
+      const features = tokenData.features ?? {};
+      const ai = new GoogleGenAI({
+        apiKey: tokenData.token,
+        ...(features.affectiveDialog || features.proactiveAudio ? { httpOptions: { apiVersion: "v1beta" } } : {}),
+      });
       const activeVoice = normalizeVoicePreference(tokenData.assistantVoice ?? assistantVoice);
       const session = await ai.live.connect({
         model: tokenData.model || LIVE_MODEL,
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: { parts: [{ text: tokenData.systemInstruction }] },
+          tools: LIVE_TOOLS,
+          ...(features.affectiveDialog ? { enableAffectiveDialog: true } : {}),
+          ...(features.proactiveAudio ? { proactivity: { proactiveAudio: true } } : {}),
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: { voiceName: VOICE_PRESETS[activeVoice] },
@@ -393,6 +439,7 @@ export default function JarvisConsole() {
         reactorRef.current?.style.setProperty("--audio-level", String(Math.min(1, rms * 7)));
 
         if (rms > 0.025) {
+          lastActivityRef.current = Date.now();
           if (!userSpeakingRef.current) {
             heardCommittedRef.current = "";
             heardInterimRef.current = "";
@@ -432,20 +479,36 @@ export default function JarvisConsole() {
       source.connect(worklet);
       await micContext.resume();
       updateStatus("listening");
+      lastActivityRef.current = Date.now();
+      const greetingEvent = `[system event] A voice session just started ${
+        trigger === "wake" ? "because the user said the wake word" : "because the user tapped start"
+      }. Greet them in ${greetingLanguage} with one short, warm sentence that fits the local time of day, then wait for their request. Do not mention this event.`;
+      try {
+        session.sendClientContent({ turns: [{ role: "user", parts: [{ text: greetingEvent }] }], turnComplete: true });
+      } catch {
+        /* the greeting is optional */
+      }
       window.localStorage.setItem("jarvis-preferred-address", preferredAddress.trim() || "Sir");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not start the connection.";
       setErrorMessage(message);
       releaseSession();
       updateStatus("error");
+      playCue("error");
+      haptic([60, 40, 60]);
     }
-  }, [playAudioChunk, preferredAddress, releaseAudio, releaseSession, resetTranscripts, updateStatus, clearPlayback]);
+  }, [accessCode, assistantVoice, greetingLanguage, playAudioChunk, preferredAddress, releaseAudio, releaseSession, resetTranscripts, updateStatus, clearPlayback]);
 
   useEffect(() => {
     const savedAddress = window.localStorage.getItem("jarvis-preferred-address");
     if (savedAddress) setPreferredAddress(cleanPreferredAddress(savedAddress) || "Sir");
     const savedVoice = window.localStorage.getItem("jarvis-assistant-voice");
     if (savedVoice) setAssistantVoice(normalizeVoicePreference(savedVoice));
+    const savedCode = window.localStorage.getItem("jarvis-access-code");
+    if (savedCode) setAccessCode(savedCode);
+    if (window.localStorage.getItem("jarvis-greeting-language") === "Sinhala") setGreetingLanguage("Sinhala");
+    setWakeSupported(isWakeWordSupported());
+    setScreenShareAvailable(isScreenShareAvailable());
   }, []);
 
   useEffect(() => {
@@ -491,9 +554,157 @@ export default function JarvisConsole() {
   const connected = status === "listening" || status === "thinking" || status === "speaking";
   const busy = status === "connecting";
   const visualState = status === "error" ? "ready" : status;
+  const standbyIdle = standby && status === "ready";
+  const badgeLabel = standbyIdle ? "Standby" : stateLabels[status];
+
+  useEffect(() => {
+    startSessionRef.current = startSession;
+  }, [startSession]);
+
+  const stopShare = useCallback(() => {
+    captureRef.current?.stop();
+    captureRef.current = null;
+    setShareMode(null);
+    setShareSeconds(0);
+  }, []);
+
+  const startShare = useCallback(async (source: FrameSource) => {
+    if (!sessionRef.current) return;
+    captureRef.current?.stop();
+    captureRef.current = null;
+    try {
+      const handle = await startFrameCapture(source, {
+        maxSeconds: MAX_VIDEO_SECONDS,
+        onFrame: (data) => {
+          try {
+            sessionRef.current?.sendRealtimeInput({ video: { data, mimeType: "image/jpeg" } });
+          } catch {
+            /* the session may have just closed */
+          }
+        },
+        onTick: (seconds) => setShareSeconds(seconds),
+        onEnded: (reason) => {
+          captureRef.current = null;
+          setShareMode(null);
+          setShareSeconds(0);
+          if (reason === "limit") {
+            setErrorMessage("Video sharing stopped to stay inside the live session time limit. You can start it again.");
+            playCue("done");
+          }
+        },
+      });
+      captureRef.current = handle;
+      setShareMode(source);
+      setErrorMessage("");
+      playCue("share");
+      haptic(25);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not start sharing.");
+    }
+  }, []);
+
+  const toggleStandby = useCallback(() => {
+    setErrorMessage("");
+    if (standby) {
+      setStandby(false);
+      playCue("done");
+      return;
+    }
+    setStandby(true);
+    playCue("standby");
+    haptic(25);
+  }, [standby]);
+
+  // Wake word: only listens while standby is on and no session is running.
+  useEffect(() => {
+    if (!standby || status !== "ready") return;
+    let cancelled = false;
+    const holder: { handle: WakeWordHandle | null } = { handle: null };
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      holder.handle = startWakeWord({
+        onWake: () => {
+          holder.handle = null;
+          playCue("wake");
+          haptic([30, 40, 30]);
+          window.setTimeout(() => {
+            void startSessionRef.current("wake");
+          }, 350);
+        },
+        onProblem: (message, fatal) => {
+          setErrorMessage(message);
+          if (fatal) setStandby(false);
+        },
+      });
+    }, 700);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      holder.handle?.stop();
+      holder.handle = null;
+    };
+  }, [standby, status]);
+
+  // Keep the screen awake while standby is on (a docked, screen-on phone is the realistic "always ready" setup).
+  useEffect(() => {
+    if (!standby) return;
+    let cancelled = false;
+    const holder: { sentinel: WakeLockSentinelLike | null } = { sentinel: null };
+    const acquire = async () => {
+      try {
+        const wakeLock = (navigator as NavigatorWithWakeLock).wakeLock;
+        if (!wakeLock || cancelled) return;
+        holder.sentinel = await wakeLock.request("screen");
+      } catch {
+        /* the browser may refuse; standby still works while the screen stays on */
+      }
+    };
+    void acquire();
+    const reacquire = () => {
+      if (document.visibilityState === "visible") void acquire();
+    };
+    document.addEventListener("visibilitychange", reacquire);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", reacquire);
+      void holder.sentinel?.release().catch(() => undefined);
+      holder.sentinel = null;
+    };
+  }, [standby]);
+
+  // In standby, end quiet sessions so the app returns to waiting for the wake word and saves quota.
+  useEffect(() => {
+    if (!standby || !connected) return;
+    lastActivityRef.current = Date.now();
+    const timer = window.setInterval(() => {
+      if (statusRef.current === "listening" && Date.now() - lastActivityRef.current > LIVE_IDLE_TIMEOUT_MS) {
+        playCue("done");
+        haptic(40);
+        releaseSession();
+        updateStatus("ready");
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [standby, connected, releaseSession, updateStatus]);
+
+  // A soft cue if a reply is taking a moment (for example while Google Search runs).
+  useEffect(() => {
+    if (status !== "thinking") return;
+    const timer = window.setTimeout(() => {
+      if (statusRef.current === "thinking") playCue("think");
+    }, 1400);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  // In standby, recover from a connection error by returning to standby after a short pause.
+  useEffect(() => {
+    if (!standby || status !== "error") return;
+    const timer = window.setTimeout(() => updateStatus("ready"), 4000);
+    return () => window.clearTimeout(timer);
+  }, [standby, status, updateStatus]);
 
   return (
-    <main className="shell">
+    <main className={`shell${standbyIdle ? " standby-dim" : ""}`}>
       <div className="hud-corner hud-corner-top" aria-hidden="true" />
       <div className="hud-corner hud-corner-bottom" aria-hidden="true" />
       <header className="topbar">
@@ -507,7 +718,7 @@ export default function JarvisConsole() {
         <div className="phase-tag"><b>01</b><span>PHASE ONE · LIVE VOICE</span></div>
         <div className={`connection-badge ${connected ? "online" : busy ? "busy" : status === "error" ? "fault" : ""}`} aria-live="polite">
           <span className="status-dot" aria-hidden="true" />
-          {stateLabels[status]}
+          {badgeLabel}
         </div>
       </header>
 
@@ -555,15 +766,66 @@ export default function JarvisConsole() {
                 <option value="female">Soft voice</option>
               </select>
             </div>
+            <div className="voice-choice">
+              <label className="field-label" htmlFor="greeting-language">Greeting language</label>
+              <select
+                id="greeting-language"
+                className="address-input voice-select"
+                value={greetingLanguage}
+                onChange={(event) => {
+                  const language: GreetingLanguage = event.target.value === "Sinhala" ? "Sinhala" : "English";
+                  setGreetingLanguage(language);
+                  window.localStorage.setItem("jarvis-greeting-language", language);
+                }}
+                disabled={connected || busy}
+              >
+                <option value="English">English</option>
+                <option value="Sinhala">සිංහල</option>
+              </select>
+            </div>
+            <div className="voice-choice">
+              <label className="field-label" htmlFor="access-code">Access code</label>
+              <input
+                id="access-code"
+                type="password"
+                className="address-input"
+                value={accessCode}
+                onChange={(event) => {
+                  setAccessCode(event.target.value);
+                  window.localStorage.setItem("jarvis-access-code", event.target.value);
+                }}
+                placeholder="Matches JARVIS_ACCESS_CODE on the server"
+                autoComplete="off"
+                disabled={connected || busy}
+              />
+            </div>
+            <p className="field-hint">The access code is saved only in this browser.</p>
             <div className="action-row">
               {!connected ? (
-                <button className="primary-button" onClick={startSession} disabled={busy}>
+                <button className="primary-button" onClick={() => void startSession("manual")} disabled={busy}>
                   <span className="button-icon" aria-hidden="true">{busy ? "···" : "◉"}</span>
                   {busy ? "Connecting…" : status === "error" ? "Reconnect" : "Start voice session"}
                 </button>
               ) : (
                 <button className="quiet-button" onClick={releaseSession}>End session</button>
               )}
+              {!connected && wakeSupported && (
+                <button className="quiet-button" onClick={toggleStandby} disabled={busy} aria-pressed={standby}>
+                  {standby ? "Disable standby" : "Enable standby"}
+                </button>
+              )}
+              {connected && (shareMode ? (
+                <button className="quiet-button" onClick={stopShare}>
+                  Stop sharing{shareSeconds ? ` · ${shareSeconds}s` : ""}
+                </button>
+              ) : (
+                <>
+                  <button className="quiet-button" onClick={() => void startShare("camera")}>Look (camera)</button>
+                  {screenShareAvailable && (
+                    <button className="quiet-button" onClick={() => void startShare("screen")}>Share screen</button>
+                  )}
+                </>
+              ))}
               <button className="quiet-button" onClick={checkRepoStatus} disabled={busy}>
                 Check repo status
               </button>
@@ -574,6 +836,14 @@ export default function JarvisConsole() {
                 {repoStatus.loading ? "Checking repository status..." : repoStatus.error ? repoStatus.error : repoStatus.text}
               </p>
             </div>
+            {standby && (
+              <p className="field-hint">
+                Standby is on. Keep this page open with the screen on; a locked phone or a page in the background cannot hear the wake word. Chrome sends standby audio to Google’s speech service.
+              </p>
+            )}
+            {shareMode && (
+              <p className="field-hint">Sharing your {shareMode === "screen" ? "screen" : "camera"} with JARVIS. It stops by itself after {MAX_VIDEO_SECONDS} seconds.</p>
+            )}
             {errorMessage && <p className="error-note" role="alert">{errorMessage}</p>}
           </div>
 
@@ -599,8 +869,8 @@ export default function JarvisConsole() {
           </div>
           <div className={`reactor-caption ${visualState}`} aria-live="polite">
             <span className="caption-marker" />
-            <strong>{stateLabels[status]}</strong>
-            <span>{stateDescriptions[status]}</span>
+            <strong>{badgeLabel}</strong>
+            <span>{standbyIdle ? "Say “Hey Jarvis” to wake me" : stateDescriptions[status]}</span>
           </div>
           <div className={`sound-bars ${visualState}`} aria-hidden="true">{Array.from({ length: 25 }, (_, index) => <i key={index} />)}</div>
 
@@ -634,4 +904,4 @@ export default function JarvisConsole() {
       </footer>
     </main>
   );
-}
+    }
