@@ -6,7 +6,11 @@ class JarvisMicProcessor extends AudioWorkletProcessor {
     this.offset = 0;
   }
 
-  process(inputs) {
+  process(inputs, outputs) {
+    for (const output of outputs[0] ?? []) {
+      output.fill(0);
+    }
+
     const channel = inputs[0]?.[0];
     if (!channel?.length) return true;
 

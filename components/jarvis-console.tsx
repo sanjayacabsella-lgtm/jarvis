@@ -155,6 +155,7 @@ export default function JarvisConsole() {
   const micContextRef = useRef<AudioContext | null>(null);
   const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micNodeRef = useRef<AudioWorkletNode | null>(null);
+  const micOutputMuteRef = useRef<GainNode | null>(null);
   const outputContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
@@ -200,12 +201,14 @@ export default function JarvisConsole() {
     userSpeakingRef.current = false;
     micNodeRef.current?.port.close();
     micNodeRef.current?.disconnect();
+    micOutputMuteRef.current?.disconnect();
     micSourceRef.current?.disconnect();
     micStreamRef.current?.getTracks().forEach((track) => track.stop());
     const micContext = micContextRef.current;
     const outputContext = outputContextRef.current;
     micStreamRef.current = null;
     micNodeRef.current = null;
+    micOutputMuteRef.current = null;
     micSourceRef.current = null;
     micContextRef.current = null;
     outputContextRef.current = null;
@@ -425,11 +428,17 @@ export default function JarvisConsole() {
       const source = micContext.createMediaStreamSource(stream);
       const worklet = new AudioWorkletNode(micContext, "jarvis-mic-processor", {
         numberOfInputs: 1,
-        numberOfOutputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
         channelCount: 1,
       });
+      const mutedOutput = micContext.createGain();
+      mutedOutput.gain.value = 0;
+      worklet.connect(mutedOutput);
+      mutedOutput.connect(micContext.destination);
       micSourceRef.current = source;
       micNodeRef.current = worklet;
+      micOutputMuteRef.current = mutedOutput;
 
       worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
         const samples = event.data;
