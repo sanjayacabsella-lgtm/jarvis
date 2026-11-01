@@ -1,6 +1,7 @@
 import type { Tool } from "@google/genai";
 
-export const LIVE_MODEL = "gemini-3.8-live" as const;
+// Temporary free-tier fallback; Google schedules this preview model to shut down on 2026-11-17.
+export const LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025" as const;
 
 // Built-in Google Search grounding. Used by BOTH the server (token constraints) and the client (connect config) so they always match.
 // Google's docs say search tools cannot be combined with function-calling tools in one Live session.
