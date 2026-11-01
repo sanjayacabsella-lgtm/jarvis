@@ -150,6 +150,7 @@ export default function JarvisConsole() {
   const [shareSeconds, setShareSeconds] = useState(0);
   const [screenShareAvailable, setScreenShareAvailable] = useState(false);
   const sessionRef = useRef<LiveSession | null>(null);
+  const expectedSessionCloseRef = useRef(false);
   const statusRef = useRef<ConsoleState>("ready");
   const micStreamRef = useRef<MediaStream | null>(null);
   const micContextRef = useRef<AudioContext | null>(null);
@@ -255,6 +256,7 @@ export default function JarvisConsole() {
   const releaseSession = useCallback(() => {
     const session = sessionRef.current;
     sessionRef.current = null;
+    expectedSessionCloseRef.current = true;
     captureRef.current?.stop();
     captureRef.current = null;
     try { session?.sendRealtimeInput({ audioStreamEnd: true }); } catch { /* session may already be closed */ }
@@ -288,6 +290,7 @@ export default function JarvisConsole() {
     setErrorMessage("");
     resetTranscripts();
     updateStatus("connecting");
+    expectedSessionCloseRef.current = false;
 
     try {
       const outputContext = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
@@ -347,7 +350,12 @@ export default function JarvisConsole() {
         ...(features.affectiveDialog || features.proactiveAudio ? { httpOptions: { apiVersion: "v1beta" } } : {}),
       });
       const activeVoice = normalizeVoicePreference(tokenData.assistantVoice ?? assistantVoice);
-      const session = await ai.live.connect({
+      let connectPending = true;
+      let rejectIfClosed: ((reason: Error) => void) | null = null;
+      const closedBeforeSetup = new Promise<never>((_, reject) => {
+        rejectIfClosed = reject;
+      });
+      const session = await Promise.race([ai.live.connect({
         model: tokenData.model || LIVE_MODEL,
         config: {
           responseModalities: [Modality.AUDIO],
@@ -369,7 +377,7 @@ export default function JarvisConsole() {
           },
         },
         callbacks: {
-          onopen: () => updateStatus("listening"),
+          onopen: () => updateStatus("connecting"),
           onmessage: (rawMessage) => {
             const message = rawMessage as IncomingMessage;
             const content = message.serverContent;
@@ -409,20 +417,32 @@ export default function JarvisConsole() {
               updateStatus("listening");
             }
           },
-          onerror: () => {
+          onerror: (event) => {
             setErrorMessage("A live voice connection problem occurred. Please reconnect.");
+            if (connectPending) rejectIfClosed?.(new Error(event.message || "Live connection failed before setup completed."));
             releaseSession();
             updateStatus("error");
           },
-          onclose: () => {
+          onclose: (event) => {
             clearPlayback();
             releaseAudio();
-            resetTranscripts();
+            captureRef.current?.stop();
+            captureRef.current = null;
+            setShareMode(null);
+            setShareSeconds(0);
             sessionRef.current = null;
-            if (statusRef.current !== "error") updateStatus("ready");
+            if (expectedSessionCloseRef.current) return;
+
+            const closeReason = event.reason.trim().slice(0, 120);
+            const detail = `Live connection closed (code ${event.code}${closeReason ? `: ${closeReason}` : ""}).`;
+            setErrorMessage(detail);
+            updateStatus("error");
+            if (connectPending) rejectIfClosed?.(new Error(detail));
           },
         },
-      });
+      }), closedBeforeSetup]);
+      connectPending = false;
+      rejectIfClosed = null;
       sessionRef.current = session;
 
       const source = micContext.createMediaStreamSource(stream);
