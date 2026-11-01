@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { checkAccess } from "@/lib/access";
 import { fetchGitHubReadData } from "@/lib/github-read";
 
 export const runtime = "nodejs";
@@ -9,6 +10,9 @@ function jsonError(message: string, status: number) {
 }
 
 export async function GET(request: Request) {
+  const access = checkAccess(request);
+  if (!access.ok) return jsonError(access.message, access.status);
+
   const url = new URL(request.url);
   const repo = url.searchParams.get("repo")?.trim();
 
@@ -34,6 +38,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const access = checkAccess(request);
+  if (!access.ok) return jsonError(access.message, access.status);
+
   try {
     const body = (await request.json()) as { repo?: string; readme?: boolean; prs?: boolean; issues?: boolean; commits?: boolean; actions?: boolean };
     const repo = body.repo?.trim();
