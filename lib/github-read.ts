@@ -62,6 +62,9 @@ function normalizeRepo(input: string): string {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) {
     throw new Error("Repo must be in the format owner/name.");
   }
+  if (value.split("/").some((part) => part === "." || part === "..")) {
+    throw new Error("Repo must be in the format owner/name.");
+  }
   return value;
 }
 
@@ -178,5 +181,4 @@ export async function fetchGitHubReadData(input: GitHubReadRequest) {
     actions: recentActions,
     readme: input.includeReadme ? readme : null,
   };
-}
-
+        }
