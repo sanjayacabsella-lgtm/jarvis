@@ -207,3 +207,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outl
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Standby: dim the whole console so a docked phone is easy on the eyes. */
+.shell { transition: filter .8s ease; }
+.shell.standby-dim { filter: brightness(.58) saturate(.9); }
