@@ -7,7 +7,9 @@ export const LIVE_MODEL = "gemini-3.8-live" as const;
 export const LIVE_TOOLS: Tool[] = [{ googleSearch: {} }];
 export const INPUT_SAMPLE_RATE = 16_000;
 export const OUTPUT_SAMPLE_RATE = 24_000;
-export const END_OF_SPEECH_SILENCE_MS = 450;
+// Keep natural mid-sentence pauses from being treated as the end of a turn.
+// This value is shared by Gemini's server-side VAD and the client's status timer.
+export const END_OF_SPEECH_SILENCE_MS = 800;
 
 export const VOICE_PRESETS = {
   male: "Achird",
